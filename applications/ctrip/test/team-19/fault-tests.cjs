@@ -15,6 +15,10 @@ async function route(p, origin, destination, iso) {
   await btn(p,'Search flights').click();
   await p.getByRole('heading',{name:'Flight results',exact:true}).waitFor();
 }
+async function flightNames(p) {
+  return region(p,'Flight list').getByRole('listitem').evaluateAll(items =>
+    items.map(item => item.getAttribute('aria-label')));
+}
 
 const cases = {
   'empty-route-fare': async p => {
@@ -38,6 +42,38 @@ const cases = {
     // A direct type into the editable field must not turn a date that the
     // public calendar rejects into a valid search. No specific alert required.
     assert.equal(await navigation,false,'Past departure date was accepted and results opened');
+  },
+  'sort-after-unsubmitted-date': async p => {
+    await home(p);
+    await route(p,'Chengdu','Guangzhou','2026-07-21');
+    const expected = ['Flight CZ3401','Flight JD5162','Flight MU5234'];
+    assert.deepEqual((await flightNames(p)).sort(),expected,'Initial published inventory');
+    await date(p,'Departure date','2026-07-22');
+    // Selecting a date edits the criteria; Update results has not been clicked.
+    assert.deepEqual((await flightNames(p)).sort(),expected,'Before sorting, the original flight list remains visible');
+    await btn(p,'Price: low to high').click();
+    assert.deepEqual(await flightNames(p),expected,'Sorting must preserve the three currently displayed flight identities');
+  },
+  'history-loses-preferences': async p => {
+    await home(p);
+    await p.getByRole('checkbox',{name:'Traveling with children',exact:true}).check();
+    await p.getByRole('combobox',{name:'Cabin class',exact:true}).selectOption('Business');
+    await route(p,'Chengdu','Guangzhou','2026-07-22');
+    assert.equal(await p.getByRole('combobox',{name:'Cabin class',exact:true}).inputValue(),'Business');
+    assert.ok(await p.getByText('Children included',{exact:true}).isVisible());
+    await p.reload();
+    await p.getByRole('heading',{name:'Flight results',exact:true}).waitFor();
+    await p.getByRole('link',{name:'Home',exact:true}).click();
+    await p.getByRole('heading',{name:'Ctrip Travel',exact:true}).waitFor();
+    const saved = region(p,'Search history').getByRole('button',{name:'Chengdu - Guangzhou',exact:true}).filter({hasText:'2026-07-22'});
+    await saved.click();
+    await p.getByRole('heading',{name:'Flight results',exact:true}).waitFor();
+    assert.equal(await field(p,'Departure date').inputValue(),'2026-07-22');
+    const restored = {
+      cabin: await p.getByRole('combobox',{name:'Cabin class',exact:true}).inputValue(),
+      children: await p.getByText('Children included',{exact:true}).isVisible()
+    };
+    assert.deepEqual(restored,{cabin:'Business',children:true},'Reusing a saved search should retain its traveler and cabin preferences');
   }
 };
 
